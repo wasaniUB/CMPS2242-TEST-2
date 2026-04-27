@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Delete Feedback</title>
+</head>
+<link rel="stylesheet" href="style.css">
+<body>
+
+    <nav>
+      <a href="index.html">Submit</a>
+      <a href="view.html">View</a>
+      <a href="update.html">Update</a>
+    </nav>
+
+<h2>Delete Feedback</h2>
+
+<input type="number" id="id" placeholder="Enter ID">
+<button onclick="deleteFeedback()">Delete</button>
+
+<script>
+async function deleteFeedback() {
+  const id = document.getElementById("id").value;
+
+  const res = await fetch(`http://localhost:4000/feedback/delete?feedback_id=${id}`, {
+     method: "DELETE"
+  });
+
+  if (!res.ok) {
+  const text = await res.text();
+  alert("Error: " + text);
+  return;
+}
+
+  const text = await res.text();
+  alert(text);
+}
+</script>
+
+</body>
+</html>
