@@ -8,9 +8,7 @@
 <body>
 
 <nav>
-      <a href="view.html">View</a>
-      <a href="update.html">Update</a>
-      <a href="delete.html">Delete</a>
+      <a href="#">Wasani Castillo</a>
     </nav>
 <h2>Submit Feedback</h2>
 
@@ -21,33 +19,9 @@
   Message: <textarea id="message" required></textarea><br><br>
 
   <button type="submit">Submit</button>
+
 </form>
-
-<script>  
-const form = document.querySelector('#feedbackForm')
-
-form.addEventListener("submit", async function(e) {
-  e.preventDefault();
-
-  const data = {
-    name: document.getElementById("name").value,
-    email: document.getElementById("email").value,
-    subject: document.getElementById("subject").value,
-    message: document.getElementById("message").value
-  };
-
-  const res = await fetch("http://localhost:4000/feedback/create", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(data)
-  });
-
-  const result = await res.json();
-  alert("Feedback submitted! ID: " + result.feedback_id);
-});
-</script>
+<script type="module" src="JS/app.js"></script>
 
 </body>
 </html>

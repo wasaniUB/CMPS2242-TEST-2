@@ -3,9 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"time"
@@ -38,58 +36,6 @@ func openDB(dsn string) (*sql.DB, error) {
 	return db, nil
 }
 
-func (app *application) writeJSON(w http.ResponseWriter, status int, data any) error {
-	js, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-
-	js = append(js, '\n')
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-
-	_, err = w.Write(js)
-	return err
-}
-
-func (app *application) readJSON(w http.ResponseWriter, r *http.Request, dst any) error {
-	const maxBytes = 1_048_576
-
-	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
-
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-
-	err := dec.Decode(dst)
-	if err != nil {
-		return fmt.Errorf("invalid JSON")
-	}
-
-	err = dec.Decode(&struct{}{})
-	if err != io.EOF {
-		return fmt.Errorf("body must only contain one JSON object")
-	}
-
-	return nil
-}
-
-func enableCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
 func main() {
 	dsn := "postgres://feedback:feedback@localhost/feedback?sslmode=disable"
 
@@ -102,5 +48,5 @@ func main() {
 	app := &application{db: db}
 
 	log.Println("Server running on :4000")
-	http.ListenAndServe(":4000", enableCORS(app.routes()))
+	http.ListenAndServe(":4000", app.routes())
 }

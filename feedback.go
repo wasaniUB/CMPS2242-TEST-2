@@ -2,45 +2,43 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"time"
 )
 
 type Feedback struct {
-	ID        int    `json:"feedback_id"`
-	Name      string `json:"name"`
-	Email     string `json:"email"`
-	Subject   string `json:"subject"`
-	Message   string `json:"message"`
-	CreatedAt string `json:"created_at"`
+	ID        int       `json:"feedback_id"`
+	Name      string    `json:"name"`
+	Email     string    `json:"email"`
+	Subject   string    `json:"subject"`
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 /*
-curl -X POST http://localhost:4000/feedback/create \
--H "Content-Type: application/json" \
-
-	-d '{
-	  "name": "Wasani",
-	  "email": "wasani@example.com",
-	  "subject": "Test Subject",
-	  "message": "This is a test message"
-	}'
+	curl -X POST http://localhost:4000/feedback/create \-H "Content-Type: application/json" \-d '{
+				  "name": "BIGWAS",
+				  "email": "bigwas@example.com",
+				  "subject": "bigs",
+				  "message": "ola"
+				}'
 */
 func (app *application) createFeedback(w http.ResponseWriter, r *http.Request) {
 	var feedback Feedback
 
 	err := app.readJSON(w, r, &feedback)
 	if err != nil {
-		app.writeJSON(w, http.StatusBadRequest, map[string]string{
+		app.writeJSON(w, http.StatusBadRequest, envelope{
 			"error": err.Error(),
-		})
+		}, nil)
 		return
 	}
 
 	if feedback.Name == "" || feedback.Email == "" || feedback.Subject == "" || feedback.Message == "" {
-		app.writeJSON(w, http.StatusBadRequest, map[string]string{
+		app.writeJSON(w, http.StatusBadRequest, envelope{
 			"error": "Full name, email, subject and message are required",
-		})
+		}, nil)
 		return
 	}
 
@@ -53,13 +51,16 @@ func (app *application) createFeedback(w http.ResponseWriter, r *http.Request) {
 	err = app.db.QueryRowContext(ctx, query, feedback.Name, feedback.Email, feedback.Subject, feedback.Message).Scan(&feedback.ID,
 		&feedback.CreatedAt)
 	if err != nil {
-		app.writeJSON(w, http.StatusInternalServerError, map[string]string{
+		app.writeJSON(w, http.StatusInternalServerError, envelope{
 			"error": err.Error(),
-		})
+		}, nil)
 		return
 	}
 
-	err = app.writeJSON(w, http.StatusCreated, feedback)
+	err = app.writeJSON(w, http.StatusCreated, envelope{
+		"feedback": feedback,
+	}, nil)
+
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -72,7 +73,7 @@ func (app *application) getFeedback(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 
-	// Get single feedback
+	//get feedback by id
 	if id != "" {
 		var f Feedback
 
@@ -84,62 +85,93 @@ func (app *application) getFeedback(w http.ResponseWriter, r *http.Request) {
 		)
 
 		if err != nil {
-			app.writeJSON(w, 404, map[string]string{"error": "Feedback not found"})
+			if err == sql.ErrNoRows {
+				app.writeJSON(w, http.StatusNotFound, envelope{
+					"error": "Feedback not found",
+				}, nil)
+				return
+			}
+
+			app.writeJSON(w, http.StatusInternalServerError, envelope{
+				"error": err.Error(),
+			}, nil)
 			return
 		}
 
-		app.writeJSON(w, 200, f)
+		app.writeJSON(w, http.StatusOK, envelope{
+			"feedback": f,
+		}, nil)
 		return
 	}
 
-	//Get all feedback
+	//get all feedbacks
 	rows, err := app.db.QueryContext(ctx, `
 		SELECT feedback_id, name, email, subject, message, created_at FROM feedback
 	`)
 	if err != nil {
-		app.writeJSON(w, 500, map[string]string{"error": err.Error()})
+		app.writeJSON(w, http.StatusInternalServerError, envelope{
+			"error": err.Error(),
+		}, nil)
 		return
 	}
-
 	defer rows.Close()
 
 	var feedbacks []Feedback
 
 	for rows.Next() {
 		var f Feedback
-		rows.Scan(&f.ID, &f.Name, &f.Email, &f.Subject, &f.Message, &f.CreatedAt)
+
+		err := rows.Scan(&f.ID, &f.Name, &f.Email, &f.Subject, &f.Message, &f.CreatedAt)
 		if err != nil {
-			app.writeJSON(w, 500, map[string]string{"error": err.Error()})
+			app.writeJSON(w, http.StatusInternalServerError, envelope{
+				"error": err.Error(),
+			}, nil)
 			return
 		}
+
 		feedbacks = append(feedbacks, f)
 	}
 
-	app.writeJSON(w, 200, feedbacks)
+	if err = rows.Err(); err != nil {
+		app.writeJSON(w, http.StatusInternalServerError, envelope{
+			"error": err.Error(),
+		}, nil)
+		return
+	}
+
+	app.writeJSON(w, http.StatusOK, envelope{
+		"feedback": feedbacks,
+	}, nil)
 }
 
 /*
-curl -X PUT "http://localhost:4000/feedback/update?feedback_id=7" \
-
-	-H "Content-Type: application/json" \
-		-d '{
-		  "name": "Wasani Updated",
-		  "email": "wasani_new@example.com",
-		  "subject": "Updated Subject",
-		  "message": "Updated message"
-		}'
+curl -X PUT "http://localhost:4000/feedback/update?feedback_id=9" \
+-H "Content-Type: application/json" \
+-d '{"name": "Wasani Updated", "email": "wasani_new@example.com", "subject": "Updated Subject", "message": "Updated message"}'
 */
 func (app *application) updateFeedback(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("feedback_id")
+
 	if id == "" {
-		app.writeJSON(w, 400, map[string]string{"error": "Missing feedback ID"})
+		app.writeJSON(w, http.StatusBadRequest, envelope{
+			"error": "Missing feedback id",
+		}, nil)
 		return
 	}
 
 	var feedback Feedback
 	err := app.readJSON(w, r, &feedback)
 	if err != nil {
-		app.writeJSON(w, 400, map[string]string{"error": err.Error()})
+		app.writeJSON(w, http.StatusBadRequest, envelope{
+			"error": err.Error(),
+		}, nil)
+		return
+	}
+
+	if feedback.Name == "" || feedback.Email == "" || feedback.Subject == "" || feedback.Message == "" {
+		app.writeJSON(w, http.StatusBadRequest, envelope{
+			"error": "All fields are required",
+		}, nil)
 		return
 	}
 
@@ -152,31 +184,37 @@ func (app *application) updateFeedback(w http.ResponseWriter, r *http.Request) {
 	result, err := app.db.ExecContext(ctx, query, feedback.Name, feedback.Email, feedback.Subject, feedback.Message, id)
 
 	if err != nil {
-		app.writeJSON(w, 500, map[string]string{"error": err.Error()})
+		app.writeJSON(w, http.StatusInternalServerError, envelope{
+			"error": err.Error(),
+		}, nil)
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		app.writeJSON(w, 500, map[string]string{"error": err.Error()})
+		app.writeJSON(w, http.StatusInternalServerError, envelope{
+			"error": err.Error(),
+		}, nil)
 		return
 	}
 
 	if rowsAffected == 0 {
-		app.writeJSON(w, 404, map[string]string{"error": "Feedback not found"})
+		app.writeJSON(w, http.StatusNotFound, envelope{
+			"error": "Feedback not found",
+		}, nil)
 		return
 	}
 
-	app.writeJSON(w, 200, map[string]string{
+	app.writeJSON(w, http.StatusOK, envelope{
 		"message": "Your feedback was updated successfully",
-	})
+	}, nil)
 }
 
-/* curl -X DELETE "http://localhost:4000/feedback/delete?feedback_id=6"*/
+/* curl -X DELETE "http://localhost:4000/feedback/delete?feedback_id=12"*/
 func (app *application) deleteFeedback(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("feedback_id")
 	if id == "" {
-		app.writeJSON(w, 400, map[string]string{"error": "Missing feedback id"})
+		app.writeJSON(w, http.StatusBadRequest, envelope{"error": "Missing feedback id"}, nil)
 		return
 	}
 
@@ -187,33 +225,36 @@ func (app *application) deleteFeedback(w http.ResponseWriter, r *http.Request) {
 
 	result, err := app.db.ExecContext(ctx, query, id)
 	if err != nil {
-		app.writeJSON(w, 500, map[string]string{"error": err.Error()})
+		app.writeJSON(w, http.StatusInternalServerError, envelope{"error": err.Error()}, nil)
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		app.writeJSON(w, 500, map[string]string{"error": err.Error()})
+		app.writeJSON(w, http.StatusInternalServerError, envelope{"error": err.Error()}, nil)
 		return
 	}
 
 	if rowsAffected == 0 {
-		app.writeJSON(w, 404, map[string]string{"error": "Feedback not found"})
+		app.writeJSON(w, http.StatusNotFound, envelope{"error": "Feedback not found"}, nil)
 		return
 	}
 
-	app.writeJSON(w, 200, map[string]string{
+	app.writeJSON(w, http.StatusOK, envelope{
 		"message": "Your feedback was deleted successfully",
-	})
+	}, nil)
 }
 
 // curl http://localhost:4000/feedback/names
 func (app *application) getNames(w http.ResponseWriter, r *http.Request) {
 	query := `SELECT name FROM feedback`
 
-	rows, err := app.db.Query(query)
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	rows, err := app.db.QueryContext(ctx, query)
+
 	if err != nil {
-		app.writeJSON(w, 500, map[string]string{"error": err.Error()})
+		app.writeJSON(w, http.StatusInternalServerError, envelope{"error": err.Error()}, nil)
 		return
 	}
 	defer rows.Close()
@@ -224,22 +265,31 @@ func (app *application) getNames(w http.ResponseWriter, r *http.Request) {
 		var n string
 		err := rows.Scan(&n)
 		if err != nil {
-			app.writeJSON(w, 500, map[string]string{"error": err.Error()})
+			app.writeJSON(w, http.StatusInternalServerError, envelope{"error": err.Error()}, nil)
 			return
 		}
 		names = append(names, n)
 	}
 
-	app.writeJSON(w, 200, names)
+	if err = rows.Err(); err != nil {
+		app.writeJSON(w, http.StatusInternalServerError, envelope{"error": err.Error()}, nil)
+		return
+	}
+
+	app.writeJSON(w, http.StatusOK, envelope{"names": names}, nil)
 }
 
-// curl http://localhost:4000/feedback/emails
+//
+
 func (app *application) getEmails(w http.ResponseWriter, r *http.Request) {
 	query := `SELECT email FROM feedback`
 
-	rows, err := app.db.Query(query)
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	rows, err := app.db.QueryContext(ctx, query)
+
 	if err != nil {
-		app.writeJSON(w, 500, map[string]string{"error": err.Error()})
+		app.writeJSON(w, http.StatusInternalServerError, envelope{"error": err.Error()}, nil)
 		return
 	}
 	defer rows.Close()
@@ -250,22 +300,30 @@ func (app *application) getEmails(w http.ResponseWriter, r *http.Request) {
 		var e string
 		err := rows.Scan(&e)
 		if err != nil {
-			app.writeJSON(w, 500, map[string]string{"error": err.Error()})
+			app.writeJSON(w, http.StatusInternalServerError, envelope{"error": err.Error()}, nil)
 			return
 		}
 		emails = append(emails, e)
 	}
 
-	app.writeJSON(w, 200, emails)
+	if err = rows.Err(); err != nil {
+		app.writeJSON(w, http.StatusInternalServerError, envelope{"error": err.Error()}, nil)
+		return
+	}
+
+	app.writeJSON(w, http.StatusOK, envelope{"emails": emails}, nil)
 }
 
 // curl http://localhost:4000/feedback/subjects
 func (app *application) getSubjects(w http.ResponseWriter, r *http.Request) {
 	query := `SELECT subject FROM feedback`
 
-	rows, err := app.db.Query(query)
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	rows, err := app.db.QueryContext(ctx, query)
+
 	if err != nil {
-		app.writeJSON(w, 500, map[string]string{"error": err.Error()})
+		app.writeJSON(w, http.StatusInternalServerError, envelope{"error": err.Error()}, nil)
 		return
 	}
 	defer rows.Close()
@@ -276,22 +334,30 @@ func (app *application) getSubjects(w http.ResponseWriter, r *http.Request) {
 		var s string
 		err := rows.Scan(&s)
 		if err != nil {
-			app.writeJSON(w, 500, map[string]string{"error": err.Error()})
+			app.writeJSON(w, http.StatusInternalServerError, envelope{"error": err.Error()}, nil)
 			return
 		}
 		subjects = append(subjects, s)
 	}
 
-	app.writeJSON(w, 200, subjects)
+	if err = rows.Err(); err != nil {
+		app.writeJSON(w, http.StatusInternalServerError, envelope{"error": err.Error()}, nil)
+		return
+	}
+
+	app.writeJSON(w, http.StatusOK, envelope{"subjects": subjects}, nil)
 }
 
 // //curl http://localhost:4000/feedback/messages
 func (app *application) getMessages(w http.ResponseWriter, r *http.Request) {
 	query := `SELECT message FROM feedback`
 
-	rows, err := app.db.Query(query)
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	rows, err := app.db.QueryContext(ctx, query)
+
 	if err != nil {
-		app.writeJSON(w, 500, map[string]string{"error": err.Error()})
+		app.writeJSON(w, http.StatusInternalServerError, envelope{"error": err.Error()}, nil)
 		return
 	}
 	defer rows.Close()
@@ -302,11 +368,16 @@ func (app *application) getMessages(w http.ResponseWriter, r *http.Request) {
 		var m string
 		err := rows.Scan(&m)
 		if err != nil {
-			app.writeJSON(w, 500, map[string]string{"error": err.Error()})
+			app.writeJSON(w, http.StatusInternalServerError, envelope{"error": err.Error()}, nil)
 			return
 		}
 		messages = append(messages, m)
 	}
 
-	app.writeJSON(w, 200, messages)
+	if err = rows.Err(); err != nil {
+		app.writeJSON(w, http.StatusInternalServerError, envelope{"error": err.Error()}, nil)
+		return
+	}
+
+	app.writeJSON(w, http.StatusOK, envelope{"messages": messages}, nil)
 }
